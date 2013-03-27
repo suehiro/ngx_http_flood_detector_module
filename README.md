@@ -1,2 +1,2 @@
-nginx_flood_detector_module
+ngx_http_flood_detector_module
 ===========================
