@@ -40,4 +40,4 @@ This variable indicates that the number of active connections exceeds flood_thre
       1     exceeds flood_threshold
       0     doesn't exceed flood_threshold
 
-if flood_threshold is 0, flood_detectd is 0.
+if flood_threshold directive is 0, flood_detectd is 0.
