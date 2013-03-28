@@ -10,17 +10,13 @@ typedef struct {
     ngx_uint_t  threshold;
 } ngx_http_flood_detector_loc_conf_t;
 
-typedef struct {
-   int detected;
-} ngx_http_flood_detector_ctx_t;
 
-static ngx_int_t ngx_http_flood_detector_handler(ngx_http_request_t *r);
 static ngx_int_t ngx_http_flood_detector_variable(ngx_http_request_t *r, ngx_http_variable_value_t *v, uintptr_t data);
 
 static ngx_int_t ngx_http_flood_detector_add_variables(ngx_conf_t *cf);
-static ngx_int_t ngx_http_flood_detector_init(ngx_conf_t *cf);
 static void *ngx_http_flood_detector_create_loc_conf(ngx_conf_t *cf);
 static char *ngx_http_flood_detector_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child);
+
 
 static ngx_command_t ngx_http_flood_detector_commands[] = {
     {  ngx_string("flood_threshold"),
@@ -35,7 +31,7 @@ static ngx_command_t ngx_http_flood_detector_commands[] = {
 
 static ngx_http_module_t ngx_http_flood_detector_module_ctx = {
     ngx_http_flood_detector_add_variables, /* preconfiguration */
-    ngx_http_flood_detector_init,          /* postconfiguration */
+    NULL,                                  /* postconfiguration */
 
     NULL,                                  /* create main configuration */
     NULL,                                  /* init main configuration */
@@ -69,49 +65,34 @@ static ngx_http_variable_t ngx_http_flood_detector_vars[] = {
     { ngx_null_string, NULL, NULL, 0, 0, 0 }
 };
 
+static ngx_str_t ngx_http_flood_detector_results[] = {
+    ngx_string("0"),
+    ngx_string("1"),
+    ngx_null_string
+};
 
-static ngx_int_t
-ngx_http_flood_detector_handler(ngx_http_request_t *r)
-{
-    ngx_http_flood_detector_ctx_t       *ctx;
-    ngx_http_flood_detector_loc_conf_t  *fdlcf;
-
-    ctx = ngx_pcalloc(r->pool, sizeof(ngx_http_flood_detector_ctx_t));
-    if (ctx == NULL) {
-        return NGX_ERROR;
-    }
-
-    ngx_http_set_ctx(r, ctx, ngx_http_flood_detector_module);
-
-    fdlcf = ngx_http_get_module_loc_conf(r, ngx_http_flood_detector_module);
-
-    if (fdlcf != NULL && (fdlcf->threshold > 0) && (*ngx_stat_active > fdlcf->threshold))
-    {
-        ctx->detected = 1;
-    } else {
-        ctx->detected = 0;
-    }
-    ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "http flood detector: ngx_stat_active = %ui, threshold = %ui, detected = %ui", *ngx_stat_active, fdlcf->threshold, ctx->detected);
-
-    return NGX_DECLINED;
-}
 
 static ngx_int_t
 ngx_http_flood_detector_variable(ngx_http_request_t *r, ngx_http_variable_value_t *v, uintptr_t data)
 {
-    ngx_http_flood_detector_ctx_t  *ctx;
+    ngx_http_flood_detector_loc_conf_t  *fdlcf;
+    int  detected;
 
-    ctx = ngx_http_get_module_ctx(r, ngx_http_flood_detector_module);
+    fdlcf = ngx_http_get_module_loc_conf(r, ngx_http_flood_detector_module);
 
-    if (ctx == NULL) {
-        v->not_found = 1;
-        return NGX_OK;
+    if (fdlcf == NULL || fdlcf->threshold == 0 || *ngx_stat_active <= fdlcf->threshold) {
+        detected = 0;
+    } else {
+        detected = 1;
     }
+
+    ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "flood_detector: stat_active = %ui, threshold = %ui, detected = %d", *ngx_stat_active, fdlcf->threshold, detected);
 
     v->valid = 1;
     v->no_cacheable = 0;
     v->not_found = 0;
-    v->len = ngx_sprintf(v->data, "%ui", ctx->detected) - v->data;
+    v->data = ngx_http_flood_detector_results[detected].data;
+    v->len = ngx_http_flood_detector_results[detected].len;
 
     return NGX_OK;
 }
@@ -126,28 +107,9 @@ ngx_http_flood_detector_add_variables(ngx_conf_t *cf)
         if (var == NULL) {
             return NGX_ERROR;
         }
-
         var->get_handler = v->get_handler;
         var->data = v->data;
     }
-
-    return NGX_OK;
-}
-
-static ngx_int_t
-ngx_http_flood_detector_init(ngx_conf_t *cf)
-{
-    ngx_http_handler_pt        *h;
-    ngx_http_core_main_conf_t  *cmcf;
-
-    cmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_core_module);
-
-    h = ngx_array_push(&cmcf->phases[NGX_HTTP_POST_READ_PHASE].handlers);
-    if (h == NULL) {
-        return NGX_ERROR;
-    }
-
-    *h = ngx_http_flood_detector_handler;
 
     return NGX_OK;
 }
@@ -161,7 +123,9 @@ ngx_http_flood_detector_create_loc_conf(ngx_conf_t *cf)
     if (conf == NULL) {
         return NGX_CONF_ERROR;
     }
+
     conf->threshold = NGX_CONF_UNSET_UINT;
+
     return conf;
 }
 
@@ -172,11 +136,6 @@ ngx_http_flood_detector_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child
     ngx_http_flood_detector_loc_conf_t  *conf = child;
 
     ngx_conf_merge_uint_value(conf->threshold, prev->threshold, 0);
-
-    if (conf->threshold < 0) {
-        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "flood_threshold must be equal or more than 0");
-        return NGX_CONF_ERROR;
-    }
 
     return NGX_CONF_OK;
 }
